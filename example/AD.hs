@@ -1,5 +1,6 @@
 {-# LANGUAGE Arrows              #-}
 {-# LANGUAGE GADTs               #-}
+{-# LANGUAGE InstanceSigs        #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}

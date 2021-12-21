@@ -18,6 +18,8 @@ module VectorSpace (
     toRawMatrix,
     evalL,
     L (..),
+    forkF,
+    evalAt,
     linear,
     VectorSpace (..),
     toVector,
@@ -41,8 +43,10 @@ data LinMap a b where
     LH :: LinMap a b -> LinMap a c -> LinMap a (b, c)
     LV :: LinMap a c -> LinMap b c -> LinMap (a, b) c
     LA :: LinMap a b -> LinMap a b -> LinMap a b
+    LF :: (b -> LinMap a c) -> LinMap a (b -> c)
+    LE :: b -> LinMap a (b -> c) -> LinMap a c
 
-deriving instance Show (LinMap a b)
+-- deriving instance Show (LinMap a b)
 
 pattern LI :: forall a b. () => (b ~ a) => LinMap a b
 pattern LI = LD 1
@@ -53,6 +57,8 @@ lmul k (LD x)   = LD (k * x)
 lmul k (LH f g) = LH (lmul k f) (lmul k g)
 lmul k (LV f g) = LV (lmul k f) (lmul k g)
 lmul k (LA f g) = LA (lmul k f) (lmul k g)
+lmul k (LF ff)  = LF $ \b -> lmul k (ff b)
+lmul k (LE b f) = LE b $ lmul k f
 
 lcomp :: LinMap b c -> LinMap a b -> LinMap a c
 lcomp LZ       _        = LZ
@@ -64,6 +70,9 @@ lcomp f        (LA g h) = LA (lcomp f g) (lcomp f h)
 lcomp (LH f g) h        = LH (lcomp f h) (lcomp g h)
 lcomp h        (LV f g) = LV (lcomp h f) (lcomp h g)
 lcomp (LV f g) (LH u v) = LA (lcomp f u) (lcomp g v)
+lcomp (LF ff)  h        = LF $ \b -> lcomp (ff b) h
+lcomp (LE b f) h        = LE b (lcomp f h)
+lcomp _h       (LE _b _f) = undefined  -- not enough tools
 
 instance Category LinMap where
     id  = LI
@@ -96,12 +105,19 @@ instance BicartesianCategory LinMap where
 
 newtype L a b = L (forall r. LinMap r a -> LinMap r b)
 
+forkF :: (b -> L a c) -> L a (b -> c)
+forkF h = L $ \da -> LF $ \b -> let L g = h b in g da
+
+evalAt :: b -> L (b -> c) c
+evalAt b = L (LE b)
+
 lfst :: LinMap a (b, c) -> LinMap a b
 lfst (LA f g) = LA (lfst f) (lfst g)
 lfst (LH f _) = f
 lfst (LV f g) = LV (lfst f) (lfst g)
 lfst LZ       = LZ
 lfst (LD k)   = LV (LD k) LZ
+lfst (LE _b _f) = undefined  -- not enough tools
 
 lsnd :: LinMap a (b, c) -> LinMap a c
 lsnd (LH _ g) = g
@@ -109,6 +125,7 @@ lsnd (LA f g) = LA (lsnd f) (lsnd g)
 lsnd (LV f g) = LV (lsnd f) (lsnd g)
 lsnd LZ       = LZ
 lsnd (LD k)   = LV LZ (LD k)
+lsnd (LE _b _f) = undefined  -- not enough tools
 
 linitial :: LinMap r () -> LinMap r a
 linitial _ = LZ
@@ -199,6 +216,8 @@ toRawMatrix (LH f g) = go splitPair f g where
 toRawMatrix (LV f g) = go splitPair f g where
     go :: (Dict (HasDim x), Dict (HasDim y)) -> LinMap x b -> LinMap y b -> L.Matrix Double
     go (Dict, Dict) f' g' = toRawMatrix f' L.=== toRawMatrix g'
+toRawMatrix LF{} = error "function space may not have a well defined dimension"
+toRawMatrix LE{} = error "function space may not have a well defined dimension"
 
 evalL :: (HasDim a, HasDim b) => L a b -> L.Matrix Double
 evalL (L f) = toRawMatrix (f (LD 1))

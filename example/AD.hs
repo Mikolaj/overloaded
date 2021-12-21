@@ -14,7 +14,7 @@ import Data.Word          (Word64)
 import Numeric            (showFFloat)
 import System.Environment (getArgs)
 
-import qualified Control.Category
+import qualified Control.Category       as C
 import qualified Numeric.LinearAlgebra  as LA
 import qualified System.Random.SplitMix as SM
 
@@ -53,12 +53,51 @@ instance GeneralizedElement AD where
 
     konst x = AD (\_ -> (x, L $ \_ -> LZ))
 
+-- the first, failed Conal's version:
+instance CCC AD where
+    type Exponential AD = (->)
+
+    -- eval :: cat (Product cat (Exponential cat a b) a) b
+    eval :: AD (b -> c, b) c
+    eval =
+      let ev :: (b -> c, b) -> (c, L (b -> c, b) c)
+          ev (f, b) = ( f b
+                      , fanin (evalAt b)
+                              -- ((der f) b)
+                              -- the fail: no derivative of f available
+                              undefined )
+      in AD ev
+
+    -- transpose :: cat (Product cat a b) c -> cat a (Exponential cat b c)
+    transpose :: AD (a, b) c -> AD a (b -> c)
+    transpose = \(AD (ff' :: (a, b) -> (c, L (a, b) c))) ->
+      let (f, f') = (proj1 . ff', proj2 . ff')
+          g :: a -> (b -> c, L a (b -> c))
+          g a = ( \b -> f (a, b)
+                , forkF $ (\b -> let L fab' = f' (a, b)
+                                 in L fab' C.. inl) )
+      in AD g
+
+-- untranspose :: cat a (Exponential cat b c) -> cat (Product cat a b) c
+untranspose :: AD a (b -> c) -> AD (a, b) c
+untranspose = \(AD (ff' :: a -> (b -> c, L a (b -> c)))) ->
+  let (f, f') = (proj1 . ff', proj2 . ff')
+      g :: (a, b) -> (c, L (a, b) c)
+      g (a, b) = ( f a b
+                 , fanin (evalAt b C.. f' a)
+                         -- (der (f a) b)
+                         -- the fail: no derivative of (f a) available
+                         -- even though derivative of f is available
+                         undefined )
+  in AD g
+
 ladd :: LinMap r (a, a) -> LinMap r a
 ladd (LH f g) = LA f g
 ladd (LV f g) = LV (ladd f) (ladd g)
 ladd (LA a b) = LA (ladd a) (ladd b)
 ladd LZ       = LZ
 ladd (LD k)   = LV (LD k) (LD k)
+ladd (LE _b _f) = undefined  -- not enough tools
 
 lmult :: Double -> Double -> LinMap r (a, a) -> LinMap r a
 lmult x y (LH f g) = LA (lmul y f) (lmul x g)
@@ -66,6 +105,7 @@ lmult x y (LV f g) = LV (lmult x y f) (lmult x y g)
 lmult x y (LA f g) = LA (lmult x y f) (lmult x y g)
 lmult _ _ LZ       = LZ
 lmult x y (LD k)   = LV (LD (k * y)) (LD (k * x))
+lmult _ _ (LE _b _f) = undefined  -- not enough tools
 
 plus :: AD (Double, Double) Double
 plus = AD $ \(x,y) -> (x + y, L ladd)
